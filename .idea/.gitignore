@@ -1,0 +1,31 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+
+# C++ build artifacts
+build/
+
+# Compiled object files
+*.o
+
+# Executable files
+*.exe
+*.out
+
+# CLion files
+.cmake/
+.idea/
+
+# Compiled libraries
+*.dll
+*.so
+*.dylib
+
+# Dependency directories
+bin/
+lib/
