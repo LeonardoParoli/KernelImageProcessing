@@ -3,4 +3,4 @@ project(KernelImageProcessing)
 
 set(CMAKE_CXX_STANDARD 17)
 
-add_executable(KernelImageProcessing main.cpp)
+add_executable(KernelImageProcessing main.cpp Image/PPMImage.cpp Image/PPMImage.h sequential/SequentialGaussianBlur.cpp sequential/SequentialGaussianBlur.h)
