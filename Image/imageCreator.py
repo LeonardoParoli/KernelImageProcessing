@@ -6,7 +6,6 @@ def create_ppm_image(width, height, center_x, center_y, num_circles):
         draw_circle(image, center_x, center_y, radius)
     save_ppm_image(image, width, height, 'image.ppm')
 
-
 def draw_circle(image, center_x, center_y, radius):
     for y in range(len(image)):
         for x in range(len(image[y])):
@@ -21,8 +20,8 @@ def save_ppm_image(image, width, height, filename):
         for row in image:
             file.write(' '.join(row) + '\n')
 
-image_width = 800
-image_height = 800
+image_width = 4000
+image_height = 4000
 circle_center_x = image_width // 2
 circle_center_y = image_height // 2
 num_of_circles = 25

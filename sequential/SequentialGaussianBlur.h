@@ -1,7 +1,6 @@
 #ifndef KERNELIMAGEPROCESSING_SEQUENTIALGAUSSIANBLUR_H
 #define KERNELIMAGEPROCESSING_SEQUENTIALGAUSSIANBLUR_H
 
-
 #include "../Image/PPMImage.h"
 
 class SequentialGaussianBlur {
@@ -9,7 +8,7 @@ class SequentialGaussianBlur {
         Pixel* pixels;
     public:
         SequentialGaussianBlur(Pixel *pixels);
-        Pixel *applyGaussianBlur(int width, int height, float sigma);
+        Pixel *applyGaussianBlur(int width, int height, float sigma, int kernelSize);
 };
 
 

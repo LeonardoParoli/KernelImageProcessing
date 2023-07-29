@@ -5,9 +5,10 @@
 #include <string>
 #include <iostream>
 #include <fstream>
+#include <vector>
 
 struct Pixel {
-    unsigned char red, green, blue;
+    int red, green, blue;
 };
 
 class PPMImage {
@@ -17,12 +18,15 @@ private:
     Pixel* pixels;
     int size;
 public:
-    PPMImage(const std::string& filename);
+    PPMImage(const std::string& filepath);
     ~PPMImage();
     int getWidth() const;
     int getHeight() const;
     int getSize() const;
     Pixel* getPixels();
+
+    bool writePPMImage(const std::string &filePath);
+    bool writePPMImage(const std::string &filePath, Pixel * newPixels);
 };
 
 
