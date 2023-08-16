@@ -23,9 +23,9 @@ int main() {
     std::cout << "Loading images ..." << std::endl;
     PPMImage image500 = PPMImage(folderPath + "/Image/image500.ppm");
     std::cout << " Image 500x500 loaded ..." << std::endl;
-    PPMImage image1000 = PPMImage(folderPath + "/Image/image500.ppm");
+    PPMImage image1000 = PPMImage(folderPath + "/Image/image1000.ppm");
     std::cout << " Image 1000x1000 loaded ..." << std::endl;
-    PPMImage image2000 = PPMImage(folderPath + "/Image/image500.ppm");
+    PPMImage image2000 = PPMImage(folderPath + "/Image/image2000.ppm");
     std::cout << " Image 2000x2000 loaded ..." << std::endl;
     PPMImage image4000 = PPMImage(folderPath + "/Image/image500.ppm");
     std::cout << " Image 4000x4000 loaded ..." << std::endl;
