@@ -9,7 +9,7 @@
 
 int main() {
     int kernelIntervalStart =7; // Min kernel dimension, must be odd
-    int kernelIntervalEnd = 9; //Max kernel dimension, must be odd (tried 15)
+    int kernelIntervalEnd = 15; //Max kernel dimension, must be odd (tried 15)
     int kernelStep = 2; //must be even
     int repeats = 3;
     float sigma = 1.5;
@@ -27,7 +27,7 @@ int main() {
     std::cout << " Image 1000x1000 loaded ..." << std::endl;
     PPMImage image2000 = PPMImage(folderPath + "/Image/image2000.ppm");
     std::cout << " Image 2000x2000 loaded ..." << std::endl;
-    PPMImage image4000 = PPMImage(folderPath + "/Image/image500.ppm");
+    PPMImage image4000 = PPMImage(folderPath + "/Image/image4000.ppm");
     std::cout << " Image 4000x4000 loaded ..." << std::endl;
     std::vector<PPMImage*> images;
     images.push_back(&image500);
@@ -95,6 +95,6 @@ int main() {
     }
 
     //saving results to .txt
-    results.saveResults();
+    results.saveResults(kernelIntervalStart, kernelStep);
     return 0;
 }

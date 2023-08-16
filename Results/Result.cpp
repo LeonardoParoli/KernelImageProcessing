@@ -23,7 +23,7 @@ Result::Result(int repeats,int minKernel, int maxKernel, int kernelStep, int ima
     this->kernelStep=kernelStep;
 }
 
-void Result::saveResults() {
+void Result::saveResults(int kernelSizeStart, int kernelStep) {
     auto* strings= new std::string[4];
     strings[0]="Image500";
     strings[1]="Image1000";
@@ -39,7 +39,7 @@ void Result::saveResults() {
             outputSequentialTimes << strings[i] << "{" << std::endl;
             int steps = ((maxKernel - minKernel)/kernelStep);
             for(int j= 0; j <= steps; j++){
-                outputSequentialTimes << "Kernel size" << j << " : [" << std::endl;
+                outputSequentialTimes << "Kernel size " << kernelSizeStart+ j*kernelStep << " : [" << std::endl;
                 outputSequentialTimes << "(" << (meanSequentialTimes[i][j] / repeats) << ")" << std::endl;
                 outputSequentialTimes << "]" << std::endl;
             }
@@ -79,7 +79,7 @@ void Result::saveResults() {
             outputParallelSpeedup << strings[i] << "{" << std::endl;
             int steps = ((maxKernel - minKernel)/kernelStep);
             for(int j= 0; j <= steps; j++){
-                outputParallelSpeedup << "Kernel size" << j << " : " << "(" << (meanSequentialTimes[i][j]/meanParallelTimes[i][j]) << ")" << std::endl;
+                outputParallelSpeedup << "Kernel size " << kernelSizeStart+ j*kernelStep << " : " << "(" << (meanSequentialTimes[i][j]/meanParallelTimes[i][j]) << ")" << std::endl;
             }
 
             outputParallelSpeedup << "}" << std::endl;

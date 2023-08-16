@@ -13,7 +13,7 @@ class Result{
         int kernelStep;
     public:
         Result(int repeats, int minKernel, int maxKernel, int kernelStep, int imagesNumber);
-        void saveResults();
+        void saveResults(int kernelSizeStart, int kernelStep);
         void addResult(long long int time,bool isSequential, int imageNumber, int kernelNumber);
 };
 
