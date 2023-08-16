@@ -54,7 +54,7 @@ struct DoublePixelSOA{
     double* blue;
 };
 
-__global__ void applyGaussianFilterKernelTiled2(PixelSOA d_pixels, DoublePixelSOA d_blurredImage, int imageWidth, int imageHeight, int kernelSize, const float* d_kernel) {
+__global__ void applyGaussianFilterKernelTiled(PixelSOA d_pixels, DoublePixelSOA d_blurredImage, int imageWidth, int imageHeight, int kernelSize, const float* d_kernel) {
     int w = blockDim.x + (kernelSize - 1);
     // shared memory
     extern __shared__ float sharedMemory[];
@@ -108,53 +108,6 @@ __global__ void applyGaussianFilterKernelTiled2(PixelSOA d_pixels, DoublePixelSO
             d_blurredImage.blue[iy * imageWidth + ix] = newValBlue;
         }
         __syncthreads();
-    }
-}
-
-__global__ void applyGaussianFilterKernelTiled(PixelSOA d_pixels, DoublePixelSOA d_blurredImage, int imageWidth, int imageHeight, int kernelSize, const float* d_kernel) {
-    int tileWidth = blockDim.x + (kernelSize - 1);
-    int tileHeight = blockDim.y + (kernelSize - 1);
-    int tileX = blockIdx.x * tileWidth;
-    int tileY = blockIdx.y * tileHeight;
-
-    extern __shared__ float sharedMemory[];
-    float* sharedRed = sharedMemory;
-    float* sharedGreen = sharedMemory + tileWidth * tileHeight;
-    float* sharedBlue = sharedGreen + tileWidth * tileHeight;
-
-    int x = threadIdx.x;
-    int y = threadIdx.y;
-    int globalX = tileX + x - (kernelSize - 1) / 2;
-    int globalY = tileY + y - (kernelSize - 1) / 2;
-    int sharedIndex = y * tileWidth + x;
-    if (globalX >= 0 && globalX < imageWidth && globalY >= 0 && globalY < imageHeight) {
-        sharedRed[sharedIndex] = d_pixels.red[globalY * imageWidth + globalX];
-        sharedGreen[sharedIndex] = d_pixels.green[globalY * imageWidth + globalX];
-        sharedBlue[sharedIndex] = d_pixels.blue[globalY * imageWidth + globalX];
-    } else {
-        sharedRed[sharedIndex] = 0.0;  // Pad with zeros
-        sharedGreen[sharedIndex] = 0.0;
-        sharedBlue[sharedIndex] = 0.0;
-    }
-    __syncthreads();
-
-    // Perform convolution on the tile
-    double convRed = 0.0, convGreen = 0.0, convBlue = 0.0;
-    for (int ky = 0; ky < kernelSize; ky++) {
-        for (int kx = 0; kx < kernelSize; kx++) {
-           int sharedImageX = x + kx;
-            int sharedImageY = y + ky;
-            convRed += ((double)sharedRed[sharedImageY * tileWidth + sharedImageX]) * d_kernel[ky * kernelSize + kx];
-            convGreen += ((double)sharedGreen[sharedImageY * tileWidth + sharedImageX]) * d_kernel[ky * kernelSize + kx];
-            convBlue += ((double)sharedBlue[sharedImageY * tileWidth + sharedImageX]) * d_kernel[ky * kernelSize + kx];
-        }
-    }
-    __syncthreads();
-
-    if (globalX >= 0 && globalX < imageWidth && globalY >= 0 && globalY < imageHeight) {
-        d_blurredImage.red[globalY * imageWidth + globalX] = convRed;
-        d_blurredImage.green[globalY * imageWidth + globalX] = convGreen;
-        d_blurredImage.blue[globalY * imageWidth + globalX] = convBlue;
     }
 }
 
@@ -270,16 +223,10 @@ __host__ void ParallelGaussianBlur::applyGaussianBlur(int width, int height, flo
     CUDA_CHECK_ERROR(cudaMalloc((void**)&d_blurredImageSOA.blue, imageSize * sizeof(double)));
 
     dim3 gridDimension(ceil(((float) width) / BLOCK_SIZE), ceil((height) / BLOCK_SIZE));
-    int w = BLOCK_SIZE + kernelSize - 1;
     int sharedMemorySize = (BLOCK_SIZE + kernelSize - 1)*(BLOCK_SIZE + kernelSize - 1) * sizeof(int) * 3;
-    applyGaussianFilterKernelTiled2<<<gridDimension, blockSize, sharedMemorySize>>>(d_pixels, d_blurredImageSOA, width, height, kernelSize, d_kernel);
+    applyGaussianFilterKernelTiled<<<gridDimension, blockSize, sharedMemorySize>>>(d_pixels, d_blurredImageSOA, width, height, kernelSize, d_kernel);
 
     /*
-    dim3 gridDimension((width+ BLOCK_SIZE - 1) / BLOCK_SIZE, (height+ BLOCK_SIZE - 1) / BLOCK_SIZE);
-    size_t sharedMemorySize = (blockSize.x) * (blockSize.y) * sizeof(float) * 3;
-    applyGaussianFilterKernelTiled<<<gridDimension, blockSize, sharedMemorySize>>>(d_pixels, d_blurredImageSOA, width, height, kernelSize, d_kernel);
-    */
-    /* NOT WORKING
     size_t sharedMemorySize = 3 * (blockSize.x + kernelSize - 1) * (blockSize.x + kernelSize - 1) * sizeof(float);
     dim3 gridDimension((width+ BLOCK_SIZE - 1) / BLOCK_SIZE, (height+ BLOCK_SIZE - 1) / BLOCK_SIZE);
     applyGaussianFilterKernelShared<<<gridDimension, blockSize, sharedMemorySize>>>(d_pixels, d_blurredImageSOA, width, height, kernelSize, d_kernel);
