@@ -10,95 +10,256 @@ static void CheckCudaErrorAux(const char* file, unsigned line, const char* state
 }
 #define CUDA_CHECK_ERROR(value) CheckCudaErrorAux(__FILE__,__LINE__, #value, value)
 
-ParallelGaussianBlur::ParallelGaussianBlur(Pixel *pixels) {
-    this->pixels = pixels;
-}
-
-__global__ void createKernel(double* kernel, int kernelSize, double sigma) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x - kernelSize / 2;
-    int y = blockIdx.y * blockDim.y + threadIdx.y - kernelSize / 2;
-    int idx = y * kernelSize + x;
-
-    if (x >= 0 && x < kernelSize && y >= 0 && y < kernelSize) {
-        kernel[idx] = exp(-(x * x + y * y) / (2 * sigma * sigma));
+ParallelGaussianBlur::ParallelGaussianBlur(Pixel* pixels, int size) {
+    int *contiguousMemory = new int[size * 3];
+    PixelSOA pixelsSOA ={contiguousMemory,contiguousMemory + size,contiguousMemory + 2 * size};
+    for(int i=0; i < size; i++ ){
+        pixelsSOA.red[i]=pixels[i].red;
+        pixelsSOA.green[i]=pixels[i].green;
+        pixelsSOA.blue[i]=pixels[i].blue;
     }
+    this->pixels = pixelsSOA;
 }
 
-void applyConvolution(Pixel* pixels, Pixel*blurredPixels, int width, int height, double* kernel, int kernelSize) {
-    int kernelRadius = kernelSize / 2;
-    for (int y = kernelRadius; y < height - kernelRadius; ++y) {
-        for (int x = kernelRadius; x < width - kernelRadius; ++x) {
-            double redAccumulator = 0.0;
-            double greenAccumulator = 0.0;
-            double blueAccumulator = 0.0;
-            for (int ky = -kernelRadius; ky <= kernelRadius; ++ky) {
-                for (int kx = -kernelRadius; kx <= kernelRadius; ++kx) {
-                    int pixelX = x + kx;
-                    int pixelY = y + ky;
-                    int kernelIndex = (ky + kernelRadius) * kernelSize + (kx + kernelRadius);
+__global__ void generateAndNormalizeGaussianKernel(float *d_kernel, int kernelSize, float sigma) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-                    double kernelValue = kernel[kernelIndex];
-                    redAccumulator += pixels[pixelY * width + pixelX].red * kernelValue;
-                    greenAccumulator += pixels[pixelY * width + pixelX].green * kernelValue;
-                    blueAccumulator += pixels[pixelY * width + pixelX].blue * kernelValue;
-                }
-            }
-            int red = std::round(redAccumulator);
-            int green = std::round(greenAccumulator);
-            int blue = std::round(blueAccumulator);
-            red = std::max(0, std::min(255, red));
-            green = std::max(0, std::min(255, green));
-            blue = std::max(0, std::min(255, blue));
-            blurredPixels[y * width + x].red = red;
-            blurredPixels[y * width + x].green = green;
-            blurredPixels[y * width + x].blue = blue;
+    if (x < kernelSize && y < kernelSize) {
+        int centerX = kernelSize / 2;
+        int centerY = kernelSize / 2;
+        int xOffset = x - centerX;
+        int yOffset = y - centerY;
+
+        float value = exp(-(xOffset * xOffset + yOffset * yOffset) / (2 * sigma * sigma));
+        d_kernel[y * kernelSize + x] = value;
+    }
+
+    __syncthreads(); // Ensure all threads have computed their values
+
+    if (x == 0 && y == 0) {
+        float sum = 0.0;
+        for (int i = 0; i < kernelSize * kernelSize; ++i) {
+            sum += d_kernel[i];
+        }
+        for (int i = 0; i < kernelSize * kernelSize; ++i) {
+            d_kernel[i] /= sum;
         }
     }
 }
 
-__host__ Pixel *ParallelGaussianBlur::applyGaussianBlur(int width, int height, float sigma, int kernelSize) {
-    //create Kernel
-    int kernelSizeSquared = kernelSize * kernelSize;
-    auto* kernel = new double[kernelSizeSquared];
-    double* d_kernel;
-    cudaMalloc((void**)&d_kernel, kernelSizeSquared * sizeof(double));
-    dim3 blockDim(16, 16);
-    dim3 gridDim((kernelSize + blockDim.x - 1) / blockDim.x, (kernelSize + blockDim.y - 1) / blockDim.y);
-    createKernel<<<gridDim, blockDim>>>(d_kernel, kernelSize, sigma);
-    cudaDeviceSynchronize();
-    cudaMemcpy(kernel, d_kernel, kernelSizeSquared * sizeof(double), cudaMemcpyDeviceToHost);
-    cudaFree(d_kernel);
-    //normalize the kernel
-    double sum = 0.0;
-    for (int i = 0; i < kernelSizeSquared; ++i) {
-        sum += kernel[i];
-    }
-    for (int i = 0; i < kernelSizeSquared; ++i) {
-        kernel[i] /= sum;
+struct DoublePixelSOA{
+    double* red;
+    double* green;
+    double* blue;
+};
+
+__global__ void applyGaussianFilterKernelTiled(PixelSOA d_pixels, DoublePixelSOA d_blurredImage, int imageWidth, int imageHeight, int kernelSize, const float* d_kernel) {
+    int tileWidth = blockDim.x;
+    int tileHeight = blockDim.y;
+
+    int tileX = blockIdx.x * tileWidth;
+    int tileY = blockIdx.y * tileHeight;
+
+    // Allocate shared memory for the tile
+    extern __shared__ float sharedMemory[];
+    float* sharedRed = sharedMemory;
+    float* sharedGreen = sharedMemory + tileWidth * tileHeight;
+    float* sharedBlue = sharedGreen + tileWidth * tileHeight;
+
+    // Load tile data into shared memory
+    int x = threadIdx.x;
+    int y = threadIdx.y;
+    int sharedIndex = y * tileWidth + x;
+
+    // Calculate global image coordinates
+    int globalX = tileX + x;
+    int globalY = tileY + y;
+
+    if (globalX < imageWidth && globalY < imageHeight) {
+        sharedRed[sharedIndex] = d_pixels.red[globalY * imageWidth + globalX];
+        sharedGreen[sharedIndex] = d_pixels.green[globalY * imageWidth + globalX];
+        sharedBlue[sharedIndex] = d_pixels.blue[globalY * imageWidth + globalX];
+    } else {
+        sharedRed[sharedIndex] = 0.0;  // Pad with zeros
+        sharedGreen[sharedIndex] = 0.0;
+        sharedBlue[sharedIndex] = 0.0;
     }
 
-    //apply convolution
-    auto* blurredImage = new Pixel[width * height];
-    Pixel* d_pixels;
-    Pixel* d_blurredImage;
-    double* d_normalizedKernel;
-    cudaMalloc((void**)&d_normalizedKernel, kernelSize * kernelSize * sizeof(double));
-    cudaMemcpy(d_normalizedKernel, kernel, kernelSize * kernelSize * sizeof(double), cudaMemcpyHostToDevice);
-    cudaMalloc((void**)&d_pixels, width * height * sizeof(Pixel));
-    cudaMemcpy(d_pixels, pixels, width * height * sizeof(Pixel), cudaMemcpyHostToDevice);
-    cudaMalloc((void**)&d_blurredImage, width * height * sizeof(Pixel));
-    applyConvolution(pixels,blurredImage,width,height,kernel,kernelSize);
-    cudaDeviceSynchronize();
-    cudaMemcpy(blurredImage, d_blurredImage, width * height * sizeof(Pixel), cudaMemcpyDeviceToHost);
+    __syncthreads();
 
-    //free memory
-    cudaFree(d_kernel);
-    cudaFree(d_pixels);
-    cudaFree(d_blurredImage);
-    return blurredImage;
+    // Perform convolution on the tile
+    double convRed = 0.0, convGreen = 0.0, convBlue = 0.0;
+
+    for (int ky = 0; ky < kernelSize; ++ky) {
+        for (int kx = 0; kx < kernelSize; ++kx) {
+            int sharedImageX = x + kx;
+            int sharedImageY = y + ky;
+
+            // Adjust indices within the tile for convolution
+            sharedImageX += kernelSize / 2;
+            sharedImageY += kernelSize / 2;
+
+            convRed += ((double)sharedRed[sharedImageY * tileWidth + sharedImageX]) * d_kernel[ky * kernelSize + kx];
+            convGreen += ((double)sharedGreen[sharedImageY * tileWidth + sharedImageX]) * d_kernel[ky * kernelSize + kx];
+            convBlue += ((double)sharedBlue[sharedImageY * tileWidth + sharedImageX]) * d_kernel[ky * kernelSize + kx];
+        }
+    }
+
+    __syncthreads();
+
+    // Write results back to global memory
+    if (globalX < imageWidth && globalY < imageHeight) {
+        d_blurredImage.red[globalY * imageWidth + globalX] = convRed;
+        d_blurredImage.green[globalY * imageWidth + globalX] = convGreen;
+        d_blurredImage.blue[globalY * imageWidth + globalX] = convBlue;
+    }
 }
 
-__global__ void vectorAdd(int* a, int* b, int* c, int n) {
+__global__ void applyGaussianFilterKernelShared(PixelSOA d_pixels, DoublePixelSOA d_blurredImage, int imageWidth, int imageHeight, int kernelSize, const float* d_kernel) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int sharedIndex = threadIdx.y * (blockDim.x + kernelSize - 1) + threadIdx.x;
+
+    // Initializing shared memory
+    extern __shared__ float sharedMemory[];
+    float* sharedRed = sharedMemory;
+    float* sharedGreen = sharedMemory + (blockDim.x + kernelSize - 1) * (blockDim.y + kernelSize - 1);
+    float* sharedBlue = sharedGreen + (blockDim.x + kernelSize - 1) * (blockDim.y + kernelSize - 1);
+    int paddedImageX = x + threadIdx.x - kernelSize / 2;
+    int paddedImageY = y + threadIdx.y - kernelSize / 2;
+    if (paddedImageX >= 0 && paddedImageX < imageWidth && paddedImageY >= 0 && paddedImageY < imageHeight) { //Padding to 0
+        sharedRed[sharedIndex] = d_pixels.red[paddedImageY * imageWidth + paddedImageX];
+        sharedGreen[sharedIndex] = d_pixels.green[paddedImageY * imageWidth + paddedImageX];
+        sharedBlue[sharedIndex] = d_pixels.blue[paddedImageY * imageWidth + paddedImageX];
+    } else {
+        sharedRed[sharedIndex] = 0.0;
+        sharedGreen[sharedIndex] = 0.0;
+        sharedBlue[sharedIndex] = 0.0;
+    }
+    __syncthreads();
+
+    // convoluton
+    double convRed = 0.0, convGreen = 0.0, convBlue = 0.0;
+    for (int ky = 0; ky < kernelSize; ++ky) {
+        for (int kx = 0; kx < kernelSize; ++kx) {
+            int sharedImageX = threadIdx.x + kx;
+            int sharedImageY = threadIdx.y + ky;
+            convRed += ((double)sharedRed[sharedImageY * (blockDim.x + kernelSize - 1) + sharedImageX]) * d_kernel[ky * kernelSize + kx];
+            convGreen += ((double)sharedGreen[sharedImageY * (blockDim.x + kernelSize - 1) + sharedImageX]) * d_kernel[ky * kernelSize + kx];
+            convBlue += ((double)sharedBlue[sharedImageY * (blockDim.x + kernelSize - 1) + sharedImageX]) * d_kernel[ky * kernelSize + kx];
+        }
+    }
+    if (x < imageWidth && y < imageHeight) {
+        d_blurredImage.red[y * imageWidth + x] = convRed;
+        d_blurredImage.green[y * imageWidth + x] = convGreen;
+        d_blurredImage.blue[y * imageWidth + x] = convBlue;
+    }
+    __syncthreads();
+}
+
+__global__ void applyGaussianFilterKernel(PixelSOA d_pixels, DoublePixelSOA d_blurredImage, int imageWidth, int imageHeight, int kernelSize, const float* d_kernel) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x < imageWidth && y < imageHeight) {
+        double convRed = 0.0, convGreen = 0.0, convBlue = 0.0;
+        for (int ky = 0; ky < kernelSize; ++ky) {
+            for (int kx = 0; kx < kernelSize; ++kx) {
+                int imageX = x + kx - kernelSize / 2;
+                int imageY = y + ky - kernelSize / 2;
+                if (imageX >= 0 && imageX < imageWidth && imageY >= 0 && imageY < imageHeight) { //ensuring thread is within bounds
+                    convRed += ((double)d_pixels.red[imageY * imageWidth + imageX]) * d_kernel[ky * kernelSize + kx];
+                    convGreen += ((double) d_pixels.green[imageY * imageWidth + imageX]) * d_kernel[ky * kernelSize + kx];
+                    convBlue += ((double)d_pixels.blue[imageY * imageWidth + imageX]) * d_kernel[ky * kernelSize + kx];
+                }
+            }
+        }
+        d_blurredImage.red[y * imageWidth + x] = convRed;
+        d_blurredImage.green[y * imageWidth + x] = convGreen;
+        d_blurredImage.blue[y * imageWidth + x] = convBlue;
+    }
+}
+
+__global__ void convertSOAToAOS(DoublePixelSOA d_blurredImageSOA, Pixel* d_blurredImageAOS, int imageSize) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < imageSize) {
+        d_blurredImageAOS[idx].red = round(d_blurredImageSOA.red[idx]);
+        d_blurredImageAOS[idx].green = round(d_blurredImageSOA.green[idx]);
+        d_blurredImageAOS[idx].blue = round(d_blurredImageSOA.blue[idx]);
+    }
+}
+
+__global__ void makeSoAContiguous(PixelSOA d_soaPoints, PixelSOA pixels, int imageSize) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx == 0){
+        d_soaPoints.green = d_soaPoints.red + imageSize;
+        d_soaPoints.blue = d_soaPoints.green + imageSize;
+    }
+    __syncthreads();
+    if (idx < imageSize*3) {
+        d_soaPoints.red[idx] = pixels.red[idx];
+    }
+}
+
+__host__ void ParallelGaussianBlur::applyGaussianBlur(int width, int height, float sigma, int kernelSize, Pixel* blurredImage) {
+    int imageSize = width*height;
+    //create Kernel
+    float *d_kernel;
+    size_t kernelBytes = kernelSize * kernelSize * sizeof(float);
+    CUDA_CHECK_ERROR(cudaMalloc((void**)&d_kernel, kernelBytes));
+
+    int BLOCK_SIZE = 16;
+    dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
+    dim3 gridSize((kernelSize + BLOCK_SIZE - 1) / BLOCK_SIZE, (kernelSize + BLOCK_SIZE - 1) / BLOCK_SIZE);
+    generateAndNormalizeGaussianKernel<<<gridSize, blockSize>>>(d_kernel, kernelSize, sigma);
+
+    //apply convolution
+    PixelSOA d_pixels;
+    DoublePixelSOA d_blurredImageSOA;
+    CUDA_CHECK_ERROR(cudaMalloc((void**)&d_pixels.red, imageSize * sizeof(int)));
+    CUDA_CHECK_ERROR(cudaMalloc((void**)&d_pixels.green, imageSize * sizeof(int)));
+    CUDA_CHECK_ERROR(cudaMalloc((void**)&d_pixels.blue, imageSize * sizeof(int)));
+    CUDA_CHECK_ERROR(cudaMemcpy(d_pixels.red, pixels.red, imageSize * sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_CHECK_ERROR(cudaMemcpy(d_pixels.green, pixels.green, imageSize * sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_CHECK_ERROR(cudaMemcpy(d_pixels.blue, pixels.blue, imageSize * sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_CHECK_ERROR(cudaMalloc((void**)&d_blurredImageSOA.red, imageSize * sizeof(double)));
+    CUDA_CHECK_ERROR(cudaMalloc((void**)&d_blurredImageSOA.green, imageSize * sizeof(double)));
+    CUDA_CHECK_ERROR(cudaMalloc((void**)&d_blurredImageSOA.blue, imageSize * sizeof(double)));
+
+    dim3 gridDimension((width+ BLOCK_SIZE - 1) / BLOCK_SIZE, (height+ BLOCK_SIZE - 1) / BLOCK_SIZE);
+    size_t sharedMemorySize = blockSize.x * blockSize.y * sizeof(float) * 3;
+    applyGaussianFilterKernelTiled<<<gridDimension, blockSize, sharedMemorySize>>>(d_pixels, d_blurredImageSOA, width, height, kernelSize, d_kernel);
+
+    /* NOT WORKING
+    size_t sharedMemorySize = 3 * (blockSize.x + kernelSize - 1) * (blockSize.x + kernelSize - 1) * sizeof(float);
+    dim3 gridDimension((width+ BLOCK_SIZE - 1) / BLOCK_SIZE, (height+ BLOCK_SIZE - 1) / BLOCK_SIZE);
+    applyGaussianFilterKernelShared<<<gridDimension, blockSize, sharedMemorySize>>>(d_pixels, d_blurredImageSOA, width, height, kernelSize, d_kernel);
+    */
+
+    /*
+    dim3 gridDimension((width+ BLOCK_SIZE - 1) / BLOCK_SIZE, (height+ BLOCK_SIZE - 1) / BLOCK_SIZE);
+    applyGaussianFilterKernel<<<gridDimension, blockSize>>>(d_pixels, d_blurredImageSOA, width, height, kernelSize,d_kernel);
+    */
+
+    Pixel* d_blurredImageAOS;
+    CUDA_CHECK_ERROR(cudaMalloc((void**)&d_blurredImageAOS, imageSize * sizeof(Pixel)));
+    int blockSizeConversion = 512;
+    int gridSizeConversion = (imageSize + blockSizeConversion - 1) / blockSizeConversion;
+    convertSOAToAOS<<<gridSizeConversion, blockSizeConversion>>>(d_blurredImageSOA, d_blurredImageAOS, imageSize);
+    CUDA_CHECK_ERROR(cudaMemcpy(blurredImage, d_blurredImageAOS, imageSize * sizeof(Pixel), cudaMemcpyDeviceToHost));
+
+    //free memory
+    CUDA_CHECK_ERROR(cudaFree(d_pixels.red));
+    CUDA_CHECK_ERROR(cudaFree(d_pixels.blue));
+    CUDA_CHECK_ERROR(cudaFree(d_pixels.green));
+    CUDA_CHECK_ERROR(cudaFree(d_blurredImageSOA.red));
+    CUDA_CHECK_ERROR(cudaFree(d_blurredImageSOA.blue));
+    CUDA_CHECK_ERROR(cudaFree(d_blurredImageSOA.green));
+    CUDA_CHECK_ERROR(cudaFree(d_kernel));
+}
+
+__global__ void vectorAdd(const int* a, const int* b, int* c, int n) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < n) {
         c[tid] = a[tid] + b[tid];

@@ -79,9 +79,7 @@ void Result::saveResults() {
             outputParallelSpeedup << strings[i] << "{" << std::endl;
             int steps = ((maxKernel - minKernel)/kernelStep);
             for(int j= 0; j <= steps; j++){
-                outputParallelSpeedup << "Kernel size" << j << " : [" << std::endl;
-                outputParallelSpeedup << "(" << (meanSequentialTimes[i][j]/meanParallelTimes[i][j]) << ")" << std::endl;
-                outputParallelSpeedup << "]" << std::endl;
+                outputParallelSpeedup << "Kernel size" << j << " : " << "(" << (meanSequentialTimes[i][j]/meanParallelTimes[i][j]) << ")" << std::endl;
             }
 
             outputParallelSpeedup << "}" << std::endl;

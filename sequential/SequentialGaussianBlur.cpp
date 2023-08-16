@@ -43,7 +43,7 @@ Pixel * SequentialGaussianBlur::applyGaussianBlur(int width, int height, float s
                 }
             }
 
-            int index = y*width +x;
+            int index = y * width + x;
             blurredImage[index].red = redAccumulator;
             blurredImage[index].green = greenAccumulator;
             blurredImage[index].blue = blueAccumulator;

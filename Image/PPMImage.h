@@ -11,6 +11,12 @@ struct Pixel {
     int red, green, blue;
 };
 
+struct PixelSOA{
+    int* red;
+    int* green;
+    int* blue;
+};
+
 class PPMImage {
 private:
     int width;

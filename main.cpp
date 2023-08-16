@@ -9,7 +9,7 @@
 
 int main() {
     int kernelIntervalStart =7; // Min kernel dimension, must be odd
-    int kernelIntervalEnd = 9; //Max kernel dimension, must be odd
+    int kernelIntervalEnd = 9; //Max kernel dimension, must be odd (tried 15)
     int kernelStep = 2; //must be even
     int repeats = 3;
     float sigma = 1.5;
@@ -56,7 +56,7 @@ int main() {
                 }
                 //checking correctness of the algorithm
                 if(imageNumber == 0 && i == 0 && k == kernelIntervalStart){
-                    image->writePPMImage(folderPath +"/Image/correctness/sequential/blurredImage.ppm",blurredImage);
+                    image->writePPMImage(folderPath +"/Image/correctness/sequential/blurredImage500.ppm",blurredImage);
                 }
             }
 
@@ -65,20 +65,21 @@ int main() {
 
     std::cout << "////////////////////////////////////////" << std::endl;
     // Starting parallel Kernel Image Processing
+    std::cout << "Running parallel CUDA test..."<< std::endl;
     for(int imageNumber=0; imageNumber <images.size(); imageNumber++){
         std::cout << "Using image number: "<< imageNumber << std::endl;
         PPMImage *image = images[imageNumber];
         Pixel* pixels = image->getPixels();
         for (int k = kernelIntervalStart; k <= kernelIntervalEnd; k += kernelStep) {
             std::cout << "-Using kernel of size: "<< k << std::endl;
-            Pixel * blurredImage;
-            ParallelGaussianBlur oprt = ParallelGaussianBlur(pixels);
+            auto * blurredImageCUDA= new Pixel[image->getWidth() * image->getHeight()];
+            ParallelGaussianBlur oprt = ParallelGaussianBlur(pixels,image->getSize());
             for (int i = 0; i < repeats; i++) {
                 if(imageNumber == 0 && k == kernelIntervalStart && i == 0){
                     oprt.kickstartGPU();
                 }
                 std::chrono::high_resolution_clock::time_point startParallelCUDA = std::chrono::high_resolution_clock::now();
-                blurredImage = oprt.applyGaussianBlur(image->getWidth(),image->getHeight(),sigma,k);
+                oprt.applyGaussianBlur(image->getWidth(),image->getHeight(),sigma,k, blurredImageCUDA);
                 std::chrono::high_resolution_clock::time_point endParallelCUDA= std::chrono::high_resolution_clock::now();
                 auto durationParallelCUDA = std::chrono::duration_cast<std::chrono::milliseconds>(endParallelCUDA - startParallelCUDA).count();
                 results.addResult(durationParallelCUDA, false, imageNumber, (k-kernelIntervalStart)/kernelStep);
@@ -87,7 +88,7 @@ int main() {
                 }
                 //checking correctness of the algorithm
                 if(imageNumber == 0 && i == 0 && k == kernelIntervalStart){
-                    image->writePPMImage(folderPath +"/Image/correctness/parallel/blurredImage.ppm",blurredImage);
+                    image->writePPMImage(folderPath +"/Image/correctness/parallel/blurredImage500.ppm",blurredImageCUDA);
                 }
             }
         }

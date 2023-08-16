@@ -5,10 +5,10 @@
 
 class ParallelGaussianBlur{
     private:
-        Pixel* pixels;
+        PixelSOA pixels;
     public:
-        ParallelGaussianBlur(Pixel *pixels);
-        Pixel *applyGaussianBlur(int width, int height, float sigma, int kernelSize);
+        ParallelGaussianBlur(Pixel* pixels, int size);
+        void applyGaussianBlur(int width, int height, float sigma, int kernelSize, Pixel* blurredImage);
         void kickstartGPU();
 };
 
