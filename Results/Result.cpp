@@ -59,7 +59,7 @@ void Result::saveResults(int kernelSizeStart, int kernelStep) {
             outputParallelTimes << strings[i] << "{" << std::endl;
             int steps = ((maxKernel - minKernel)/kernelStep);
             for(int j= 0; j <= steps; j++){
-                outputParallelTimes << "Kernel size" << j << " : [" << std::endl;
+                outputParallelTimes << "Kernel size " << kernelSizeStart+ j*kernelStep << " : [" << std::endl;
                 outputParallelTimes << "(" << meanParallelTimes[i][j]/ repeats << ")" << std::endl;
                 outputParallelTimes << "]" << std::endl;
             }

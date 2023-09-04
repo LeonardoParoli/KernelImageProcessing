@@ -9,7 +9,7 @@
 
 int main() {
     int kernelIntervalStart =7; // Min kernel dimension, must be odd
-    int kernelIntervalEnd = 15; //Max kernel dimension, must be odd (tried 15)
+    int kernelIntervalEnd = 9; //Max kernel dimension, must be odd (tried 25)
     int kernelStep = 2; //must be even
     int repeats = 3;
     float sigma = 1.5;
@@ -79,7 +79,7 @@ int main() {
                     oprt.kickstartGPU();
                 }
                 std::chrono::high_resolution_clock::time_point startParallelCUDA = std::chrono::high_resolution_clock::now();
-                oprt.applyGaussianBlur(image->getWidth(),image->getHeight(),sigma,k, blurredImageCUDA);
+                oprt.applyGaussianBlurTest(image->getWidth(),image->getHeight(),sigma,k, blurredImageCUDA);
                 std::chrono::high_resolution_clock::time_point endParallelCUDA= std::chrono::high_resolution_clock::now();
                 auto durationParallelCUDA = std::chrono::duration_cast<std::chrono::milliseconds>(endParallelCUDA - startParallelCUDA).count();
                 results.addResult(durationParallelCUDA, false, imageNumber, (k-kernelIntervalStart)/kernelStep);

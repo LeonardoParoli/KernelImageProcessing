@@ -9,6 +9,7 @@ class ParallelGaussianBlur{
     public:
         ParallelGaussianBlur(Pixel* pixels, int size);
         void applyGaussianBlur(int width, int height, float sigma, int kernelSize, Pixel* blurredImage);
+        void applyGaussianBlurTest(int width, int height, float sigma, int kernelSize, Pixel* blurredImage);
         void kickstartGPU();
 };
 
